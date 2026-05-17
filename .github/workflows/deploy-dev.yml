@@ -28,7 +28,7 @@ jobs:
 
       BUILD_CONTEXT: '[
           {"path":"./server","image":"server"},
-          {"path":"./app","image":"app"}
+          {"path":"./app/app","image":"app"}
         ]'
 
       TAG_NAME: ${{ format('dev-{0}', github.sha) }}
