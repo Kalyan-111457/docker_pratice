@@ -1,0 +1,111 @@
+name: Deploy to Dev
+
+on:
+  push:
+    branches:
+      - develop
+
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+
+
+  # 2. BUILD AND PUSH DOCKER IMAGES
+  build-and-publish:
+    name: Build and Publish Containers
+
+    uses: ./.github/workflows/container-build-azure.yml
+
+    with:
+      ENVIRONMENT: 'dev'
+
+      BUILD_CONTEXT: '[
+          {"path":"./server","image":"server"},
+          {"path":"./app","image":"app"}
+        ]'
+
+      TAG_NAME: ${{ format('dev-{0}', github.sha) }}
+
+      USES_SECRETS: 'false'
+
+    secrets: inherit
+
+  # 3. PREPARE DEPLOY MATRIX
+  prep_deploy_matrix:
+    name: Prep Matrix for Deploy
+    runs-on: ubuntu-latest
+
+    needs: [build-and-publish]
+
+    environment: dev
+
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+
+    steps:
+      - id: set-matrix
+
+        env:
+          SERVER_APP_NAME: ${{ vars.SERVER_APP_NAME }}
+          APP_APP_NAME: ${{ vars.APP_APP_NAME }}
+
+        run: |
+          MATRIX_JSON=$(jq -n -c \
+            --arg server_app "$SERVER_APP_NAME" \
+            --arg app_app "$APP_APP_NAME" \
+            '{
+              include: [
+                {
+                  "path":"./server",
+                  "image":"server",
+                  "app_name":$server_app
+                },
+                {
+                  "path":"./app",
+                  "image":"app",
+                  "app_name":$app_app
+                }
+              ]
+            }')
+
+          echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
+
+  # 4. DEPLOY TO AZURE APP SERVICE
+  deploy-to-azure:
+    name: Deploy to Azure App Service
+
+    runs-on: ubuntu-latest
+
+    needs: [prep_deploy_matrix]
+
+    environment: dev
+
+    strategy:
+      matrix: ${{ fromJson(needs.prep_deploy_matrix.outputs.matrix) }}
+
+    env:
+      TAG_NAME: ${{ format('dev-{0}', github.sha) }}
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+
+        with:
+          app-name: ${{ matrix.app_name }}
+          images: '${{ vars.ACR_URL }}/${{ matrix.image }}:${{ env.TAG_NAME }}'
+
+      - name: Azure Logout
+        run: az logout
