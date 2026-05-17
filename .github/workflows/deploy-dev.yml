@@ -33,8 +33,6 @@ jobs:
 
       TAG_NAME: ${{ format('dev-{0}', github.sha) }}
 
-      USES_SECRETS: 'false'
-
     secrets: inherit
 
   # 3. PREPARE DEPLOY MATRIX
